@@ -7,17 +7,21 @@
 #define rho 0.8442
 #define dt 0.001
 #define tmax 1/dt
-
+#define nhis 15
+#define PI 3.14159
 
 void init(float *L, float *x, float *y, float *z,
             float *xm, float *ym, float *zm,
-            float *v_x, float *v_y, float *v_z);
+            float *v_x, float *v_y, float *v_z,
+            int *g, float *delg);
 void force(float *fx, float *fy, float *fz,
-            double *U, float *x, float *y, float *z, float L);
+            double *U, float *x, float *y, float *z, 
+            float L, int *ngr, float delg, float *g);
 void integrate(double U, float *temp, double *etot, double *k, float L,
                 float *fx, float *fy, float *fz,
                 float *x, float *y, float *z,
                 float *xm, float *ym, float *zm);
+void gr(float delg, float *g, double *r, int *ngr, float L, float *x, float *y, float *z);
 
 int main(){
 
@@ -28,24 +32,28 @@ int main(){
     float fx[N], fy[N], fz[N];
     float L, temp;
     double U = 0, etot = 0, k = 0;
+    int ngr = 0;
+    float delg, g[nhis], r[nhis];
 
-    FILE *arq;
-    arq = fopen("saida.txt", "w");
-    fprintf(arq, "# U K E\n");
+    FILE *arq_Energias;
+    arq_Energias = fopen("energias.txt", "w");
+    fprintf(arq_Energias, "# U K E\n");
 
     printf("\n\tCondicoes Iniciais\n");
-    printf("\tt0: %f\n\tN: %d\n\trho: %d\n\ttmax: %d\n\tdt: %d\n", t0, N, rho, tmax, dt);
+    printf("\tt0: %f\n\tN: %d\n\trho: %fn\ttmax: %f\n\tdt: %f\n", t0, N, rho, tmax, dt);
 
-    init(&L, x, y, z, xm, ym, zm, v_x, v_y, v_z);
+    init(&L, x, y, z, xm, ym, zm, v_x, v_y, v_z, g, &delg);
     
     for(int i = 0 ; i < tmax ; i++)
     {
-        force(fx, fy, fz, &U, x, y, z, L);
+        force(fx, fy, fz, &U, x, y, z, L, &ngr, delg, g);
         integrate(U, &temp, &etot, &k , L, fx, fy, fz, x, y, z, xm, ym, zm);
-        fprintf(arq, "%f %f %f\n", U, k, etot);
+        fprintf(arq_Energias, "%f %f %f\n", U, k, etot);
     }
+
+    gr(delg, g, r, &ngr, L, x, y, z);
     
-    fclose(arq);    
+    fclose(arq_Energias);    
 /*
     for(int i = 0 ; i<N; i++){
         printf("\nParticula %d\n", i);
@@ -54,8 +62,9 @@ int main(){
         printf(" fx: %f fy: %f fz: %f\n", fx[i], fy[i], fz[i]);
     }
 */
-    printf("\nEnergia Potencial Total: %f", U);
-    printf("\nEnergia por Particula: %f", etot);
+    printf("\nEnergia Potencial: %f", U);
+    printf("\nEnergia Total por Particula: %f", etot);
+    printf("\nEnergia Cinetica: %f", k);
     printf("\nTemperatura: %f\n", temp);
 
     return 0;
@@ -63,7 +72,7 @@ int main(){
 
 void init(float *L, float *x, float *y, float *z,
             float *xm, float *ym, float *zm,
-            float *v_x, float *v_y, float *v_z){
+            float *v_x, float *v_y, float *v_z, int *g, float *delg){
     
     /*
         Funcao para posicionar as particulas em uma rede cristalina e
@@ -77,15 +86,24 @@ void init(float *L, float *x, float *y, float *z,
     */
 
     // Definicao de variáveis
-    float espaco, fs_x, fs_y, fs_z;
+    float espaco;
     int n3, part, i = 0, j = 0, k = 0;
     float sumv_x = 0, sumv_y = 0, sumv_z = 0;
     float sumv2_x = 0, sumv2_y = 0, sumv2_z = 0;
+    float sumv2 = 0, fs;
+    
 
     // Tamanho da caixa e espacamento entre as particulas
     *L = cbrt((float)N/rho);
     n3 = ceil(cbrt(N));
     espaco = (float) *L/n3;
+
+    // Distribuicao Radial da Inicializacao
+    *delg = *L/(2*nhis);
+    for(int n = 0 ; n < nhis ; n++)
+    {
+        g[n] = 0;
+    }
 
     printf("\n\tCaracteristicas da caixa\n");
     printf("\tL: %f\n\tn3: %i\n\tespaco: %f\n", *L, n3, espaco);
@@ -127,32 +145,29 @@ void init(float *L, float *x, float *y, float *z,
     sumv_z /= N;
 
     // Media das velocidades quadradas
-    sumv2_x /= N;
-    sumv2_y /= N;
-    sumv2_z /= N;
+    sumv2 = (sumv2_x + sumv2_y + sumv2_z)/ N;
 
     // Fator de escala das velocidades
-    fs_x = sqrt(3 * t0 / sumv2_x);
-    fs_y = sqrt(3 * t0 / sumv2_y);
-    fs_z = sqrt(3 * t0 / sumv2_z);
+    fs = sqrt(3 * t0 / sumv2);
 
     // Correcao das velocidades
     for(i = 0 ; i < N ; i++){
 
-        v_x[i] = (v_x[i] - sumv_x) * fs_x;
-        v_y[i] = (v_y[i] - sumv_y) * fs_y;
-        v_z[i] = (v_z[i] - sumv_z) * fs_z;
+        v_x[i] = (v_x[i] - sumv_x) * fs;
+        v_y[i] = (v_y[i] - sumv_y) * fs;
+        v_z[i] = (v_z[i] - sumv_z) * fs;
 
         // Posicao anterior conforme a conservacao de momentum
         xm[i] = x[i] - (v_x[i] * dt);
         ym[i] = y[i] - (v_y[i] * dt);
         zm[i] = z[i] - (v_z[i] * dt);
-    }
+    } 
 
 }
 
 void force(float *fx, float *fy, float *fz,
-            double *U, float *x, float *y, float *z, float L){
+            double *U, float *x, float *y, float *z, 
+            float L, int *ngr, float delg, float *g){
     
     /*
         Funcao para calcular as forcas entre cada particula a partir do potencial de Lennard-Jones 
@@ -169,6 +184,8 @@ void force(float *fx, float *fy, float *fz,
     float xr, yr, zr;
     float rc2, ecut;
     float r2, r2i, r6i, ff;
+    float r; 
+    int ig;
 
     // Forcas e energias nulas
     double en = 0;
@@ -218,7 +235,7 @@ void force(float *fx, float *fy, float *fz,
                 // Atualizacao da energia potencial total
                 en += (4 * r6i * (r6i - 1)) - ecut;
             }
-            r2 = 0.0;
+            //r2 = 0.0;
         }
     }
     *U = en/N;
@@ -280,11 +297,62 @@ void integrate(double U, float *temp, double *etot, double *k, float L,
     }
 
     // O centro de massa nao pode se mover
-    if(-0.0001 < sumvi < 0.0001 || -0.0001 < sumvj < 0.0001 || -0.0001 < sumvk < 0.0001)
-       printf("\nATENCAO: A velocidade do centro de massa e diferente de zero.\nVi = %f Vj = %f Vk = %f\n", sumvi, sumvj, sumvk);
+    //if((-0.5 < sumvi && sumvi < 0.5) || (-0.5 < sumvj && sumvj < 0.5) || (-0.5 < sumvk && sumvk < 0.5))
+       //printf("\nATENCAO: A velocidade do centro de massa e diferente de zero.\nVi = %f Vj = %f Vk = %f\n", sumvi, sumvj, sumvk);
 
     // Calculo da temperatura e energia total do sistema
     *temp = sumv2/(3*N);
     *k = 0.5*sumv2/N;
     *etot = U + *k;
+}
+
+void gr(float delg, float *g, double *r, int *ngr, float L,
+            float *x, float *y, float *z){
+
+    float xr, yr, zr;
+    int ig;
+    float vb, nid, d;
+
+    FILE *arq_Gr;
+    arq_Gr = fopen("g(r).txt", "w");
+    
+    *ngr = *ngr + 1;
+
+    for(int i = 0 ; i < N-1 ; i++)
+    {
+        for(int j = i+1 ; j < N ; j++)
+        {
+            // Cálculo das distâncias de um par de partículas em cada coordenada
+            xr = x[i] - x[j];
+            xr = xr - (L * round(xr/L));
+
+            yr = y[i] - y[j];
+            yr = yr - (L * round(yr/L));
+
+            zr = z[i] - z[j];
+            zr = zr - (L * round(zr/L));
+
+            // Cálculo da distância total de um par de partículas
+            d = sqrt(pow(xr, 2) + pow(yr, 2) + pow(zr, 2));
+            
+            if(d < L/2)
+            {
+                ig = (int) (d/delg);
+                g[ig] += 2;
+            }
+        }
+    }
+
+    for(int i = 0; i < nhis; i++)
+    {
+
+        r[i] = delg*(i + 0.5);
+        vb = (pow(i+1, 3) - pow(i, 3))*pow(delg, 3);
+        nid = (4/3) * PI * vb * rho;
+        g[i] = g[i]/(*ngr * N * nid);
+        fprintf(arq_Gr, "%f %f\n", g[i], r[i]);
+        
+    }
+    
+    fclose(arq_Gr);
 }
