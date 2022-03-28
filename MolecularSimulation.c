@@ -5,7 +5,7 @@
 #define t0 0.728
 #define N 108
 #define rho 0.8442
-#define dt 0.001 
+#define dt 0.001
 #define tmax 1/dt
 #define nhis 108
 #define PI 3.14159
@@ -18,7 +18,7 @@ void init(float *L, float *x, float *y, float *z,
 void force(float *fx, float *fy, float *fz,
             double *U, float *x, float *y, float *z,
             float L, float *g, int *ngr, float delg, int e);
-void integrate(double U, float *temp, double *etot, 
+void integrate(double U, float *temp, double *etot,
                 double *k, float L, int e, float *dr2,
                 float *fx, float *fy, float *fz,
                 float *x, float *y, float *z,
@@ -28,9 +28,9 @@ void gr(float delg, float *g, float *r, int ngr);
 
 int main(){
 
-    // Número de passos analisados
-    int steps = (int) tmax/0.01;
-    
+    //Número de passos analisados
+    int steps = (int) tmax/0.1;
+
     //Definição das variáveis
     float x[N], y[N], z[N];
     float x0[N], y0[N], z0[N];
@@ -38,15 +38,19 @@ int main(){
     float v_x[N], v_y[N], v_z[N];
     float fx[N], fy[N], fz[N];
     float L, temp, delg;
-    double U = 0, etot = 0, k = 0;
     int ngr = 0, step = 0;
+    double U = 0, etot = 0, k = 0;
     float g[nhis], r[nhis], dr2[steps], time[steps];
-    
 
     //Criação de arquivo para salvar energias
     FILE *arq_Energias;
     arq_Energias = fopen("energias.txt", "w");
-    fprintf(arq_Energias, "# T U K E dr\n");
+    fprintf(arq_Energias, "# T U K E\n");
+
+    //Criação de arquivo para salvar deslocamento quadrático médio
+    FILE *arq_MSD;
+    arq_MSD = fopen("msd.txt", "w");
+    fprintf(arq_MSD, "# T dr\n");
 
     //Impressão do cabeçalho do programa
     printf("This is a Molecular Dynamic Simulation with Verlet Algorithm.\n");
@@ -61,30 +65,38 @@ int main(){
     //Inicialização da caixa
     init(&L, x, y, z, x0, y0, z0, xm, ym, zm, v_x, v_y, v_z, g, &delg);
 
-    //Loop sobre o tempo
-    for(float i = 0 ; i < tmax ; i += 0.01)
-    {   
-        // Instantes analisados
-        time[step] = i;
+    //Loop sobre tempo
+    for(float t = 0 ; t < tmax ; t += 0.1)
+    {
+	    //Instantes de tempo analisdos
+        time[step] = t;
 
-        // Cálculo e integração das forças
-        force(fx, fy, fz, &U, x, y, z, L, g, &ngr, delg, i);
+   	    //Cálculo e integração das forças
+        force(fx, fy, fz, &U, x, y, z, L, g, &ngr, delg, t);
         integrate(U, &temp, &etot, &k , L, step, dr2, fx, fy, fz, x, y, z, x0, y0, z0, xm, ym, zm);
-        
-        Impressão dos resultados em arquivos
-        fprintf(arq_Energias, "%f %f %f %f %f\n", time[step], U, k, etot, dr2[step]);
-        
-        
-        // Contabilização dos passos percorridos
+
+        //Impressão dos resultados em arquivos
+        fprintf(arq_Energias, "%f %f %f %f\n", time[step], U, k, etot);
+	    fprintf(arq_MSD, "%f %f\n", time[step], dr2[step]);
+
+        //Impressão do tempo em execução
+        if((int)(t*10) % (100*10) == 0 && t != 0)
+	      printf("\nArrived on time %.0f", t);
+
+        //Contabilização de passos percorridos
         step += 1;
     }
+
+    //Fechamento dos arquivos
     fclose(arq_Energias);
+    fclose(arq_MSD);
 
     //Normalização de g(r)
     gr(delg, g, r, ngr);
 
     //Impressão das condições de equílibrio
-    printf("\nNumber of computations of g(r): %d\n", ngr);
+    printf("\n\nNumber of computations of g(r): %d\n", ngr);
+    printf("\n|Final Conditions|");
     printf("\nPotential Energy: %.4f", U);
     printf("\nTotal Energy per Particle: %.4f", etot);
     printf("\nKinetic Energy: %.4f", k);
@@ -93,7 +105,7 @@ int main(){
     return 0;
 }
 
-void init(float *L, float *x, float *y, float *z, 
+void init(float *L, float *x, float *y, float *z,
             float *x0, float *y0, float *z0,
             float *xm, float *ym, float *zm,
             float *v_x, float *v_y, float *v_z, float *g, float *delg){
@@ -194,8 +206,8 @@ void init(float *L, float *x, float *y, float *z,
 
 }
 
-void force(float *fx, float *fy, float *fz, double *U, 
-            float *x, float *y, float *z, float L, 
+void force(float *fx, float *fy, float *fz, double *U,
+            float *x, float *y, float *z, float L,
             float *g, int *ngr, float delg, int e){
 
     /*
@@ -263,7 +275,7 @@ void force(float *fx, float *fy, float *fz, double *U,
                 }
 
             }
-            
+
 
             // Calculo da forca se r2 for menor que a distancia mínima
             if(r2 < rc2 && r2 != 0)
@@ -294,11 +306,11 @@ void force(float *fx, float *fy, float *fz, double *U,
         *ngr = *ngr + 1;
 }
 
-void integrate(double U, float *temp, double *etot, 
+void integrate(double U, float *temp, double *etot,
                 double *k, float L, int e, float *dr2,
                 float *fx, float *fy, float *fz,
                 float *x, float *y, float *z,
-                float *x0, float *y0, float *z0, 
+                float *x0, float *y0, float *z0,
                 float *xm, float *ym, float *zm){
 
     /*
@@ -384,7 +396,7 @@ void gr(float delg, float *g, float *r, int ngr){
     float vb, nid;
 
     FILE *arq_Gr;
-    arq_Gr = fopen("g(r).txt", "w");
+    arq_Gr = fopen("g_r.txt", "w");
 
     for(int i = 0; i < nhis; i++)
     {
