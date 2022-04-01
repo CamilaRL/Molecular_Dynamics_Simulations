@@ -7,7 +7,7 @@
 #define rho 0.8442
 #define dt 0.001
 #define tmax 1/dt
-#define nhis 15
+#define nhis 108
 #define PI 3.14159
 
 void init(float *L, float *x, float *y, float *z,
@@ -16,12 +16,12 @@ void init(float *L, float *x, float *y, float *z,
             int *g, float *delg);
 void force(float *fx, float *fy, float *fz,
             double *U, float *x, float *y, float *z, 
-            float L, int *ngr, float delg, float *g);
+            float L, float *g, int *ngr, float delg, int e);
 void integrate(double U, float *temp, double *etot, double *k, float L,
                 float *fx, float *fy, float *fz,
                 float *x, float *y, float *z,
                 float *xm, float *ym, float *zm);
-void gr(float delg, float *g, double *r, int *ngr, float L, float *x, float *y, float *z);
+void gr(float delg, float *g, double *r, int ngr);
 
 int main(){
 
@@ -42,16 +42,18 @@ int main(){
     printf("\n\tCondicoes Iniciais\n");
     printf("\tt0: %f\n\tN: %d\n\trho: %fn\ttmax: %f\n\tdt: %f\n", t0, N, rho, tmax, dt);
 
+
     init(&L, x, y, z, xm, ym, zm, v_x, v_y, v_z, g, &delg);
     
-    for(int i = 0 ; i < tmax ; i++)
+    for(float i = 0 ; i < tmax ; i = i + 0.01)
     {
-        force(fx, fy, fz, &U, x, y, z, L, &ngr, delg, g);
+        force(fx, fy, fz, &U, x, y, z, L, g, &ngr, delg, i);
         integrate(U, &temp, &etot, &k , L, fx, fy, fz, x, y, z, xm, ym, zm);
         fprintf(arq_Energias, "%f %f %f\n", U, k, etot);
     }
 
-    gr(delg, g, r, &ngr, L, x, y, z);
+    gr(delg, g, r, ngr);
+    printf("ngr: %d\n", ngr);
     
     fclose(arq_Energias);    
 /*
@@ -167,7 +169,7 @@ void init(float *L, float *x, float *y, float *z,
 
 void force(float *fx, float *fy, float *fz,
             double *U, float *x, float *y, float *z, 
-            float L, int *ngr, float delg, float *g){
+            float L, float *g, int *ngr, float delg, int e){
     
     /*
         Funcao para calcular as forcas entre cada particula a partir do potencial de Lennard-Jones 
@@ -177,7 +179,7 @@ void force(float *fx, float *fy, float *fz,
             L = tamanho da lateral da caixa
             x, y, z = arrays com as posicoes de cada particula em cada coordenada
             fx, fy, fz = arrays com as forcas em cada coordenada
-            en = energia potencial total
+            U = energia potencial total
     */
 
     // Definição de variaveis
@@ -190,13 +192,14 @@ void force(float *fx, float *fy, float *fz,
     // Forcas e energias nulas
     double en = 0;
 
-    for(int i = 0 ; i < N ; i++){
+    for(int i = 0 ; i < N ; i++)
+    {
         fx[i] = fy[i] = fz[i] = 0;
     }
 
     // Distância máxima de interação e potencial de Lennard-Jones
     rc2 = pow(L/2, 2);
-    ecut = 4 * ((1/pow(rc2, 6)) - (1/pow(rc2, 3)));
+    ecut = 4 * ((1/pow(rc2, 6)) - (1/pow(rc2, 3))); 
 
     // Calculo das forcas para cada par de particulas
     for(int i = 0 ; i < N-1 ; i++)
@@ -215,6 +218,19 @@ void force(float *fx, float *fy, float *fz,
 
             // Cálculo da distância total de um par de partículas
             r2 = pow(xr, 2) + pow(yr, 2) + pow(zr, 2);
+            
+            // Distribuição Radial
+            if(e >= 800)
+            {
+                r = sqrt(r2);
+
+                if(r < L/2)
+              {   
+                    ig = (int) (r/delg);
+                    g[ig] += 2;
+                }
+
+            }
             
             // Calculo da forca se r2 for menor que a distancia mínima
             if(r2 < rc2 && r2 != 0)
@@ -235,10 +251,14 @@ void force(float *fx, float *fy, float *fz,
                 // Atualizacao da energia potencial total
                 en += (4 * r6i * (r6i - 1)) - ecut;
             }
-            //r2 = 0.0;
         }
     }
+    // Energia potencial por partícula
     *U = en/N;
+    
+    // Contagem de cálculos de g(r)
+    if(e >= 800)
+        *ngr = *ngr + 1;
 }
 
 void integrate(double U, float *temp, double *etot, double *k, float L,
@@ -306,53 +326,33 @@ void integrate(double U, float *temp, double *etot, double *k, float L,
     *etot = U + *k;
 }
 
-void gr(float delg, float *g, double *r, int *ngr, float L,
-            float *x, float *y, float *z){
+void gr(float delg, float *g, double *r, int ngr){
 
-    float xr, yr, zr;
-    int ig;
-    float vb, nid, d;
+    /*
+        Função que normaliza a distribuição radial, g(r).
+
+        Entrada:
+            delg = tamanho dos intervalos do histograma
+            g* = distribuição radial
+            *r = raio da região contabilizada
+            *ngr = número de cálculos de g(r)
+    */
+
+    float vb, nid;
 
     FILE *arq_Gr;
     arq_Gr = fopen("g(r).txt", "w");
-    
-    *ngr = *ngr + 1;
-
-    for(int i = 0 ; i < N-1 ; i++)
-    {
-        for(int j = i+1 ; j < N ; j++)
-        {
-            // Cálculo das distâncias de um par de partículas em cada coordenada
-            xr = x[i] - x[j];
-            xr = xr - (L * round(xr/L));
-
-            yr = y[i] - y[j];
-            yr = yr - (L * round(yr/L));
-
-            zr = z[i] - z[j];
-            zr = zr - (L * round(zr/L));
-
-            // Cálculo da distância total de um par de partículas
-            d = sqrt(pow(xr, 2) + pow(yr, 2) + pow(zr, 2));
-            
-            if(d < L/2)
-            {
-                ig = (int) (d/delg);
-                g[ig] += 2;
-            }
-        }
-    }
 
     for(int i = 0; i < nhis; i++)
     {
 
-        r[i] = delg*(i + 0.5);
-        vb = (pow(i+1, 3) - pow(i, 3))*pow(delg, 3);
-        nid = (4/3) * PI * vb * rho;
-        g[i] = g[i]/(*ngr * N * nid);
-        fprintf(arq_Gr, "%f %f\n", g[i], r[i]);
+        r[i] = delg*(i + 0.5); // Distância do raio
+        vb = (pow(i+1, 3) - pow(i, 3))*pow(delg, 3); // Volume da esfera avaliada
+        nid = (4/3) * PI * vb * rho; // Número de partículas
+        g[i] = g[i]/(ngr * N * nid); // Normalização da g(r)
         
+        fprintf(arq_Gr, "%f %f\n", g[i], r[i]);
     }
-    
+
     fclose(arq_Gr);
 }
