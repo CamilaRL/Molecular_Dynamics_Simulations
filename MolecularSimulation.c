@@ -2,45 +2,56 @@
 #include <stdlib.h>
 #include <math.h>
 
+// Dados do sistema
 #define t0 0.728
 #define N 108
 #define rho 0.8442
+// Passos de tempo, tempo máximo e tempo de equilibrio
 #define dt 0.001
+#define dtef 0.1 // passo utilizado para testes
 #define tmax 1/dt
+#define teq 800
+// Estatistica g(r)
 #define nhis 108
+// Constantes
 #define PI 3.14159
 
+
 void init(float *L, float *x, float *y, float *z,
-            float *x0, float *y0, float *z0,
             float *xm, float *ym, float *zm,
             float *v_x, float *v_y, float *v_z,
             float *g, float *delg);
 void force(float *fx, float *fy, float *fz,
             double *U, float *x, float *y, float *z,
-            float L, float *g, int *ngr, float delg, int e);
+            float L, float *g, int *ngr, float delg, float t);
 void integrate(double U, float *temp, double *etot,
-                double *k, float L, int e, float *dr2,
+                double *k, float L,
                 float *fx, float *fy, float *fz,
                 float *x, float *y, float *z,
-                float *x0, float *y0, float *z0,
                 float *xm, float *ym, float *zm);
 void gr(float delg, float *g, float *r, int ngr);
+void msd(int ref, double *dr2, float *x, float *y, float *z, float *x0, float *y0, float *z0);
+
 
 int main(){
 
     //Número de passos analisados
-    int steps = (int) tmax/0.1;
+    int nsteps = (int) tmax/dtef;
+    int nmsd = nsteps - (int) teq/dtef;
 
-    //Definição das variáveis
+    //Definição dos vetores de posições, velocidades e forças
     float x[N], y[N], z[N];
     float x0[N], y0[N], z0[N];
     float xm[N], ym[N], zm[N];
     float v_x[N], v_y[N], v_z[N];
     float fx[N], fy[N], fz[N];
+
+    //Definição de variáveis
     float L, temp, delg;
-    int ngr = 0, step = 0;
+    int ngr = 0, step = 0, ref = 0;;
     double U = 0, etot = 0, k = 0;
-    float g[nhis], r[nhis], dr2[steps], time[steps];
+    double dr2[nmsd];
+    float g[nhis], r[nhis], time[nsteps];
 
     //Criação de arquivo para salvar energias
     FILE *arq_Energias;
@@ -52,51 +63,80 @@ int main(){
     arq_MSD = fopen("msd.txt", "w");
     fprintf(arq_MSD, "# T dr\n");
 
+    //Criação de arquivo para salvar as posições
+    FILE *arq_pos;
+
     //Impressão do cabeçalho do programa
-    printf("This is a Molecular Dynamic Simulation with Verlet Algorithm.\n");
+    printf("\nThis is a Molecular Dynamic Simulation with Verlet Algorithm.\n");
     printf("It positions a determined number of particles in a box, calculates the forces between them and integrate these forces.\n");
     printf("It also computes the g(r) function, saving r and g(r) in a file.\n");
     printf("Energy for each step is also saved in a file.\n");
     printf("This program uses Verlet algorithm and Lennard-Jones potential.\n");
     printf("Authors: Camila Raupp and Vitoria Henkes, from Federal University of Rio Grande do Sul.\n\n");
     printf("\t|Initial Conditions|\n");
-    printf("\tTemperature: %.3f\n\tNumber of particles: %d\n\tDensity: %.4f\n\tMaximum time: %.0f\n\tTime variation: %.3f\n", t0, N, rho, tmax, dt);
+    printf("\tTemperature: %.3f\n\tNumber of particles: %d\n\tDensity: %.4f\n\tMaximum time: %.0f\n\tTime variation: %.3f\n\tEffective time variation: %.3f\n", t0, N, rho, tmax, dt, dtef);
 
     //Inicialização da caixa
-    init(&L, x, y, z, x0, y0, z0, xm, ym, zm, v_x, v_y, v_z, g, &delg);
+    init(&L, x, y, z, xm, ym, zm, v_x, v_y, v_z, g, &delg);
 
     //Loop sobre tempo
-    for(float t = 0 ; t < tmax ; t += 0.1)
+    for(float t = 0 ; t <= tmax ; t += dtef)
     {
 	    //Instantes de tempo analisdos
         time[step] = t;
 
+        // Arquivo para salvar as posições a cada 100 passos
+        if(step % 1000 == 0)
+        {
+            char filename[30] = {0};
+            sprintf(filename, "%s//pos%d.txt", "./posicoes", (int)(step*dtef));
+            arq_pos = fopen(filename, "w");
+            fprintf(arq_pos, "108\n");
+            fprintf(arq_pos, "Caixa no tempo %d\n", (int)t);
+            //Salvamento das posições iniciais em um arquivo
+            for(int part = 0; part < N ; part++)
+            {
+                fprintf(arq_pos, "W %f %f %f\n", x[part], y[part], z[part]);
+            }
+        }
+
    	    //Cálculo e integração das forças
         force(fx, fy, fz, &U, x, y, z, L, g, &ngr, delg, t);
-        integrate(U, &temp, &etot, &k , L, step, dr2, fx, fy, fz, x, y, z, x0, y0, z0, xm, ym, zm);
+        integrate(U, &temp, &etot, &k , L, fx, fy, fz, x, y, z, xm, ym, zm);
+
+        //Deslocamento quadrado médio (Mean Square Displacement, MSD)
+        if(t >= teq){
+            msd(ref, dr2, x, y, z, x0, y0, z0);
+            ref++;
+        }
 
         //Impressão dos resultados em arquivos
         fprintf(arq_Energias, "%f %f %f %f\n", time[step], U, k, etot);
-	    fprintf(arq_MSD, "%f %f\n", time[step], dr2[step]);
 
         //Impressão do tempo em execução
-        if((int)(t*10) % (100*10) == 0 && t != 0)
+        if(step % (int)(100/dtef) == 0)
 	      printf("\nArrived on time %.0f", t);
+
 
         //Contabilização de passos percorridos
         step += 1;
     }
 
+    //Normalização de g(r), calculada em force
+    gr(delg, g, r, ngr);
+
+    //Impressão do MSD em arquivo
+    for(int i = 0 ; i < nmsd ; i++)
+        fprintf(arq_MSD, "%f %f\n", i*dtef, dr2[i]);
+
+
     //Fechamento dos arquivos
     fclose(arq_Energias);
     fclose(arq_MSD);
+    fclose(arq_pos);
 
-    //Normalização de g(r)
-    gr(delg, g, r, ngr);
-
-    //Impressão das condições de equílibrio
-    printf("\n\nNumber of computations of g(r): %d\n", ngr);
-    printf("\n|Final Conditions|");
+    //Impressão das condições de equílibrio (final)
+    printf("\n\n|Final Conditions|");
     printf("\nPotential Energy: %.4f", U);
     printf("\nTotal Energy per Particle: %.4f", etot);
     printf("\nKinetic Energy: %.4f", k);
@@ -106,7 +146,6 @@ int main(){
 }
 
 void init(float *L, float *x, float *y, float *z,
-            float *x0, float *y0, float *z0,
             float *xm, float *ym, float *zm,
             float *v_x, float *v_y, float *v_z, float *g, float *delg){
 
@@ -151,10 +190,6 @@ void init(float *L, float *x, float *y, float *z,
         x[part] = i * espaco;
         y[part] = j * espaco;
         z[part] = k * espaco;
-
-        x0[part] = i * espaco;
-        y0[part] = j * espaco;
-        z0[part] = k * espaco;
 
         i++;
         if(i == n3){
@@ -203,12 +238,11 @@ void init(float *L, float *x, float *y, float *z,
         ym[i] = y[i] - (v_y[i] * dt);
         zm[i] = z[i] - (v_z[i] * dt);
     }
-
 }
 
 void force(float *fx, float *fy, float *fz, double *U,
             float *x, float *y, float *z, float L,
-            float *g, int *ngr, float delg, int e){
+            float *g, int *ngr, float delg, float t){
 
     /*
         Funcao para calcular as forcas entre cada particula a partir do potencial de Lennard-Jones
@@ -264,12 +298,12 @@ void force(float *fx, float *fy, float *fz, double *U,
             r2 = pow(xr, 2) + pow(yr, 2) + pow(zr, 2);
 
             // Distribuição Radial
-            if(e >= 800) // Iteração a partir da qual o sistema já estabilizou
+            if(t >= teq) // Iteração a partir da qual o sistema já estabilizou
             {
                 r = sqrt(r2);
 
                 if(r < L/2)
-              {
+                {
                     ig = (int) (r/delg);
                     g[ig] += 2;
                 }
@@ -302,15 +336,14 @@ void force(float *fx, float *fy, float *fz, double *U,
     *U = en/N;
 
     // Contagem de cálculos de g(r)
-    if(e >= 800)
+    if(t >= teq)
         *ngr = *ngr + 1;
 }
 
 void integrate(double U, float *temp, double *etot,
-                double *k, float L, int e, float *dr2,
+                double *k, float L,
                 float *fx, float *fy, float *fz,
                 float *x, float *y, float *z,
-                float *x0, float *y0, float *z0,
                 float *xm, float *ym, float *zm){
 
     /*
@@ -331,7 +364,7 @@ void integrate(double U, float *temp, double *etot,
     float sumvi = 0, sumvj = 0, sumvk = 0, sumv2 = 0;
     float xx = 0, yy = 0, zz = 0;
     float vi, vj, vk;
-    float r0, rf;
+
 
     for(int i = 0 ; i < N ; i++){
 
@@ -364,12 +397,7 @@ void integrate(double U, float *temp, double *etot,
 
         zm[i] = z[i];
         z[i] = zz;
-
-        // Deslocamento quadrado médio (Mean Square Displacement, MSD)
-        dr2[e] += pow((x[i]-x0[i]), 2) + pow((y[i]-y0[i]), 2) + pow((z[i]-z0[i]), 2);
     }
-
-    dr2[e] /= N; // Normalização do MSD
 
     // O centro de massa nao pode se mover
     //if((-0.5 < sumvi && sumvi < 0.5) || (-0.5 < sumvj && sumvj < 0.5) || (-0.5 < sumvk && sumvk < 0.5))
@@ -410,4 +438,25 @@ void gr(float delg, float *g, float *r, int ngr){
     }
 
     fclose(arq_Gr);
+}
+
+void msd(int ref, double *dr2, float *x, float *y, float *z, float *x0, float *y0, float *z0){
+
+    // Se estiver em um tempo de referência, guarda as posições
+    if(ref == 0){
+        for(int part = 0 ; part < N ; part++){
+            x0[part] = x[part];
+            y0[part] = y[part];
+            z0[part] = z[part];}
+    }
+    // Caso contrário, calcula o MSD
+    else if(ref > 0){
+        dr2[ref] = 0;
+        for(int part = 0 ; part < N ; part++)
+            // Aculumula o MSD de cada partícula
+            dr2[ref] += pow((x[part]-x0[part]), 2) + pow((y[part]-y0[part]), 2) + pow((z[part]-z0[part]), 2);
+
+    // Normalização do MSD
+    dr2[ref] /= N;
+    }
 }
