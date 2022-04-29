@@ -9,7 +9,7 @@
 // Passos de tempo, tempo máximo e tempo de equilibrio
 #define dt 0.001
 #define dtef 0.1 // passo utilizado para testes
-#define tmax 1/dt
+#define tmax 10/dt
 #define teq 800
 // Estatistica g(r)
 #define nhis 108
@@ -30,7 +30,11 @@ void integrate(double U, float *temp, double *etot,
                 float *x, float *y, float *z,
                 float *xm, float *ym, float *zm);
 void gr(float delg, float *g, float *r, int ngr);
-void msd(int ref, double *dr2, float *x, float *y, float *z, float *x0, float *y0, float *z0);
+void msd(int ref, double *dr2,
+         float *fx, float *fy, float *fz,
+         float *x, float *y, float *z,
+         float *xm, float *ym, float *zm,
+         float *x0, float *y0, float *z0);
 
 
 int main(){
@@ -42,13 +46,15 @@ int main(){
     //Definição dos vetores de posições, velocidades e forças
     float x[N], y[N], z[N];
     float x0[N], y0[N], z0[N];
+    float xd[N], yd[N], zd[N];
+    float xdm[N], ydm[N], zdm[N];
     float xm[N], ym[N], zm[N];
     float v_x[N], v_y[N], v_z[N];
     float fx[N], fy[N], fz[N];
 
     //Definição de variáveis
-    float L, temp, delg;
-    int ngr = 0, step = 0, ref = 0;;
+    float L, temp, delg, t = 0;
+    int ngr = 0, ref = 0;
     double U = 0, etot = 0, k = 0;
     double dr2[nmsd];
     float g[nhis], r[nhis], time[nsteps];
@@ -80,8 +86,8 @@ int main(){
     init(&L, x, y, z, xm, ym, zm, v_x, v_y, v_z, g, &delg);
 
     //Loop sobre tempo
-    for(float t = 0 ; t <= tmax ; t += dtef)
-    {
+    for(int step = 0 ; step <= nsteps ; step ++){
+
 	    //Instantes de tempo analisdos
         time[step] = t;
 
@@ -92,12 +98,10 @@ int main(){
             sprintf(filename, "%s//pos%d.txt", "./posicoes", (int)(step*dtef));
             arq_pos = fopen(filename, "w");
             fprintf(arq_pos, "108\n");
-            fprintf(arq_pos, "Caixa no tempo %d\n", (int)t);
+            fprintf(arq_pos, "Caixa no tempo %d\n", (int)(step*dtef));
             //Salvamento das posições iniciais em um arquivo
             for(int part = 0; part < N ; part++)
-            {
                 fprintf(arq_pos, "W %f %f %f\n", x[part], y[part], z[part]);
-            }
         }
 
    	    //Cálculo e integração das forças
@@ -106,7 +110,25 @@ int main(){
 
         //Deslocamento quadrado médio (Mean Square Displacement, MSD)
         if(t >= teq){
-            msd(ref, dr2, x, y, z, x0, y0, z0);
+            dr2[ref] = 0;
+            // Se estiver em um tempo de referência, guarda as posições
+            if(ref == 0){
+                for(int part = 0 ; part < N ; part++){
+                    x0[part] = x[part];
+                    y0[part] = y[part];
+                    z0[part] = z[part];}
+            }else if(ref == 1){
+                for(int part = 0 ; part < N ; part++){
+                    xdm[part] = x[part];
+                    ydm[part] = y[part];
+                    zdm[part] = z[part];}
+            }else if(ref == 2){
+                for(int part = 0 ; part < N ; part++){
+                    xd[part] = x[part];
+                    yd[part] = y[part];
+                    zd[part] = z[part];}
+            }
+            msd(ref, dr2, fx, fy, fz, xd, yd, zd, xdm, ydm, zdm, x0, y0, z0);
             ref++;
         }
 
@@ -117,9 +139,8 @@ int main(){
         if(step % (int)(100/dtef) == 0)
 	      printf("\nArrived on time %.0f", t);
 
-
-        //Contabilização de passos percorridos
-        step += 1;
+        //Contabilização do tempo de simulação
+        t += dtef;
     }
 
     //Normalização de g(r), calculada em force
@@ -370,17 +391,12 @@ void integrate(double U, float *temp, double *etot,
 
         // Calculo das proximas posicoes e velocidades
         xx = (2*x[i]) - xm[i] + (pow(dt, 2) * fx[i]);
-        //printf("%f", xx);
-        xx = xx - (L * round(xx/L));
-        //printf("    %f\n", xx);
         vi = (xx - xm[i]) / (2*dt);
 
         yy = (2*y[i]) - ym[i] + (pow(dt, 2) * fy[i]);
-        yy = yy - (L * round(yy/L));
         vj = (yy - ym[i]) / (2*dt);
 
         zz = (2*z[i]) - zm[i] + (pow(dt, 2) * fz[i]);
-        zz = zz - (L * round(zz/L));
         vk = (zz - zm[i]) / (2*dt);
 
         sumvi += vi;
@@ -440,22 +456,31 @@ void gr(float delg, float *g, float *r, int ngr){
     fclose(arq_Gr);
 }
 
-void msd(int ref, double *dr2, float *x, float *y, float *z, float *x0, float *y0, float *z0){
+void msd(int ref, double *dr2,
+         float *fx, float *fy, float *fz,
+         float *x, float *y, float *z,
+         float *xm, float *ym, float *zm,
+         float *x0, float *y0, float *z0){
 
-    // Se estiver em um tempo de referência, guarda as posições
-    if(ref == 0){
-        for(int part = 0 ; part < N ; part++){
-            x0[part] = x[part];
-            y0[part] = y[part];
-            z0[part] = z[part];}
-    }
-    // Caso contrário, calcula o MSD
-    else if(ref > 0){
-        dr2[ref] = 0;
-        for(int part = 0 ; part < N ; part++)
-            // Aculumula o MSD de cada partícula
-            dr2[ref] += pow((x[part]-x0[part]), 2) + pow((y[part]-y0[part]), 2) + pow((z[part]-z0[part]), 2);
+    float xx = 0, yy = 0, zz = 0;
 
+    if(ref >= 2){
+
+        for(int i = 0 ; i < N ; i++){
+            xx = (2*x[i]) - xm[i] + (pow(dt, 2) * fx[i]);
+            xm[i] = x[i];
+            x[i] = xx;
+
+            yy = (2*y[i]) - ym[i] + (pow(dt, 2) * fy[i]);
+            ym[i] = y[i];
+            y[i] = yy;
+
+            zz = (2*z[i]) - zm[i] + (pow(dt, 2) * fz[i]);
+            zm[i] = z[i];
+            z[i] = zz;
+
+            dr2[ref] += pow((x[i]-x0[i]), 2) + pow((y[i]-y0[i]), 2) + pow((z[i]-z0[i]), 2);
+        }
     // Normalização do MSD
     dr2[ref] /= N;
     }
