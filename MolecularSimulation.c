@@ -13,14 +13,15 @@
 #define teq 800
 // Estatistica g(r)
 #define nhis 108
+// Estatistica msd
+#define nmsd 2000
 // Constantes
 #define PI 3.14159
 
 
 void init(float *L, float *x, float *y, float *z,
             float *xm, float *ym, float *zm,
-            float *v_x, float *v_y, float *v_z,
-            float *g, float *delg);
+            float *v_x, float *v_y, float *v_z, float *delg);
 void force(float *fx, float *fy, float *fz,
             double *U, float *x, float *y, float *z,
             float L, float *g, int *ngr, float delg, float t);
@@ -42,7 +43,6 @@ int main(){
 
     //Número de passos analisados
     int nsteps = (int) tmax/dtef;
-    int nmsd = nsteps - (int) teq/dtef;
 
     //Definição dos vetores de posições, velocidades e forças
     float x[N], y[N], z[N];
@@ -56,8 +56,8 @@ int main(){
     float L, temp, delg, t = 0;
     int ngr = 0, ref = 0;
     double U = 0, etot = 0, k = 0;
-    double dr2[nmsd], vac[nmsd];
-    float g[nhis], r[nhis], time[nsteps];
+    double dr2[nmsd] = {0}, vac[nmsd] = {0};
+    float g[nhis] = {0}, r[nhis], time[nsteps];
 
     //Criação de arquivo para salvar energias
     FILE *arq_Energias;
@@ -88,7 +88,7 @@ int main(){
     printf("\tTemperature: %.3f\n\tNumber of particles: %d\n\tDensity: %.4f\n\tMaximum time: %.0f\n\tTime variation: %.3f\n\tEffective time variation: %.3f\n", t0, N, rho, tmax, dt, dtef);
 
     //Inicialização da caixa
-    init(&L, x, y, z, xm, ym, zm, v_x, v_y, v_z, g, &delg);
+    init(&L, x, y, z, xm, ym, zm, v_x, v_y, v_z,  &delg);
 
     //Loop sobre tempo
     for(int step = 0 ; step < nsteps ; step++)
@@ -116,8 +116,8 @@ int main(){
         integrate(U, &temp, &etot, &k , L, fx, fy, fz, x, y, z, xm, ym, zm, v_x, v_y, v_z);
 
         //Deslocamento quadrado médio (Mean Square Displacement, MSD)
-        if((int) t > teq){
-            msd(ref, dr2, vac, x, y, z, x0, y0, z0, v_x, v_y, v_z, v_x0, v_y0, v_z0);
+        if(step >= teq/dtef){
+            msd(step % nmsd, dr2, vac, x, y, z, x0, y0, z0, v_x, v_y, v_z, v_x0, v_y0, v_z0);
             ref++;
         }
 
@@ -135,10 +135,13 @@ int main(){
     //Normalização de g(r), calculada em force
     gr(delg, g, r, ngr);
 
-    //Impressão do MSD e da VAC em arquivo
-    for(int i = 0 ; i < nmsd ; i++){
-        fprintf(arq_MSD, "%f %f\n", i*dtef, dr2[i]);
-        fprintf(arq_VAC, "%f %f\n", i*dtef, vac[i]);
+    //Impressão do MSD e da VAC em arquivo + normalizaçaõ
+    ref = ref/nmsd;
+    printf("\nref: %i\n", ref);
+    for(int i = 0 ; i < nmsd ; i++)
+    {
+        fprintf(arq_MSD, "%f %f\n", i*dtef, dr2[i]/ref);
+        fprintf(arq_VAC, "%f %f\n", i*dtef, vac[i]/ref);
     }
         
     //Fechamento dos arquivos
@@ -159,7 +162,7 @@ int main(){
 
 void init(float *L, float *x, float *y, float *z,
             float *xm, float *ym, float *zm,
-            float *v_x, float *v_y, float *v_z, float *g, float *delg){
+            float *v_x, float *v_y, float *v_z, float *delg){
 
     /*
         Funcao para posicionar as particulas em uma rede cristalina e
@@ -188,10 +191,6 @@ void init(float *L, float *x, float *y, float *z,
 
     // Distribuicao Radial da Inicializacao
     *delg = *L/(2*nhis);
-    for(int n = 0 ; n < nhis ; n++)
-    {
-        g[n] = 0;
-    }
 
     printf("\n\t|Box Characteristics|\n");
     printf("\tSide: %.4f\n\tParticles per dimension: %i\n\tSpace between sequential particles: %.4f\n", *L, n3, espaco);
@@ -481,9 +480,6 @@ void msd(int ref, double *dr2, double *vac,
     }
     // Caso contrário, calcula o MSD
     else if(ref > 0){
-        dr2[ref] = 0;
-        vac[ref] = 0;
-
         for(int part = 0 ; part < N ; part++){
             // Aculumula o MSD de cada partícula
             dr2[ref] += pow((x[part]-x0[part]), 2) + pow((y[part]-y0[part]), 2) + pow((z[part]-z0[part]), 2);
