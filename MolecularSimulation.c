@@ -8,32 +8,32 @@
 #define rho 0.8442
 // Passos de tempo, tempo máximo e tempo de equilibrio
 #define dt 0.001
-#define dtef 0.1 // passo utilizado para testes
+#define dtef 0.01 // passo utilizado para testes
 #define tmax 1/dt
 #define teq 800
 // Estatistica g(r)
 #define nhis 108
 // Estatistica msd
-#define nmsd 2000
+#define nmsd 1000
 // Constantes
 #define PI 3.14159
 
 
 void init(float *L, float *x, float *y, float *z,
-            float *xm, float *ym, float *zm,
+            float *x_msd, float *y_msd, float *z_msd,
             float *v_x, float *v_y, float *v_z, float *delg);
 void force(float *fx, float *fy, float *fz,
             double *U, float *x, float *y, float *z,
             float L, float *g, int *ngr, float delg, float t);
-void integrate(double U, float *temp, double *etot,
+void integrate(int verlet, double U, float *temp, double *etot,
                 double *k, float L,
                 float *fx, float *fy, float *fz,
                 float *x, float *y, float *z,
-                float *xm, float *ym, float *zm,
+                float *x_msd, float *y_msd, float *z_msd,
                 float *v_x, float *v_y, float *v_z);
 void gr(float delg, float *g, float *r, int ngr);
 void msd(int ref, double *dr2, double *vac,
-            float *x, float *y, float *z, 
+            float *x, float *y, float *z,
             float *x0, float *y0, float *z0,
             float *v_x, float *v_y, float *v_z,
             float *v_x0, float *v_y0, float *v_z0);
@@ -46,8 +46,8 @@ int main(){
 
     //Definição dos vetores de posições, velocidades e forças
     float x[N], y[N], z[N];
+    float x_msd[N], y_msd[N], z_msd[N];
     float x0[N], y0[N], z0[N];
-    float xm[N], ym[N], zm[N];
     float v_x[N], v_y[N], v_z[N];
     float v_x0[N], v_y0[N], v_z0[N];
     float fx[N], fy[N], fz[N];
@@ -88,7 +88,8 @@ int main(){
     printf("\tTemperature: %.3f\n\tNumber of particles: %d\n\tDensity: %.4f\n\tMaximum time: %.0f\n\tTime variation: %.3f\n\tEffective time variation: %.3f\n", t0, N, rho, tmax, dt, dtef);
 
     //Inicialização da caixa
-    init(&L, x, y, z, xm, ym, zm, v_x, v_y, v_z,  &delg);
+    init(&L, x, y, z, x_msd, y_msd, z_msd, v_x, v_y, v_z,  &delg);
+    force(fx, fy, fz, &U, x, y, z, L, g, &ngr, delg, t);
 
     //Loop sobre tempo
     for(int step = 0 ; step < nsteps ; step++)
@@ -112,12 +113,13 @@ int main(){
         }
 
    	    //Cálculo e integração das forças
+        integrate(1, U, &temp, &etot, &k , L, fx, fy, fz, x, y, z, x_msd, y_msd, z_msd, v_x, v_y, v_z);
         force(fx, fy, fz, &U, x, y, z, L, g, &ngr, delg, t);
-        integrate(U, &temp, &etot, &k , L, fx, fy, fz, x, y, z, xm, ym, zm, v_x, v_y, v_z);
+        integrate(2, U, &temp, &etot, &k , L, fx, fy, fz, x, y, z, x_msd, y_msd, z_msd, v_x, v_y, v_z);
 
         //Deslocamento quadrado médio (Mean Square Displacement, MSD)
         if(step >= teq/dtef){
-            msd(step % nmsd, dr2, vac, x, y, z, x0, y0, z0, v_x, v_y, v_z, v_x0, v_y0, v_z0);
+            msd(step % nmsd, dr2, vac, x_msd, y_msd, z_msd, x0, y0, z0, v_x, v_y, v_z, v_x0, v_y0, v_z0);
             ref++;
         }
 
@@ -143,7 +145,7 @@ int main(){
         fprintf(arq_MSD, "%f %f\n", i*dtef, dr2[i]/ref);
         fprintf(arq_VAC, "%f %f\n", i*dtef, vac[i]/ref);
     }
-        
+
     //Fechamento dos arquivos
     fclose(arq_Energias);
     fclose(arq_MSD);
@@ -161,7 +163,7 @@ int main(){
 }
 
 void init(float *L, float *x, float *y, float *z,
-            float *xm, float *ym, float *zm,
+            float *x_msd, float *y_msd, float *z_msd,
             float *v_x, float *v_y, float *v_z, float *delg){
 
     /*
@@ -201,6 +203,10 @@ void init(float *L, float *x, float *y, float *z,
         x[part] = i * espaco;
         y[part] = j * espaco;
         z[part] = k * espaco;
+
+        x_msd[part] = i * espaco;
+        y_msd[part] = j * espaco;
+        z_msd[part] = k * espaco;
 
         i++;
         if(i == n3){
@@ -243,11 +249,6 @@ void init(float *L, float *x, float *y, float *z,
         v_x[i] = (v_x[i] - sumv_x) * fs;
         v_y[i] = (v_y[i] - sumv_y) * fs;
         v_z[i] = (v_z[i] - sumv_z) * fs;
-
-        // Posicao anterior conforme a conservacao de momentum
-        xm[i] = x[i] - (v_x[i] * dt);
-        ym[i] = y[i] - (v_y[i] * dt);
-        zm[i] = z[i] - (v_z[i] * dt);
     }
 }
 
@@ -351,11 +352,11 @@ void force(float *fx, float *fy, float *fz, double *U,
         *ngr = *ngr + 1;
 }
 
-void integrate(double U, float *temp, double *etot,
+void integrate(int verlet, double U, float *temp, double *etot,
                 double *k, float L,
                 float *fx, float *fy, float *fz,
                 float *x, float *y, float *z,
-                float *xm, float *ym, float *zm,
+                float *x_msd, float *y_msd, float *z_msd,
                 float *v_x, float *v_y, float *v_z){
 
     /*
@@ -375,49 +376,61 @@ void integrate(double U, float *temp, double *etot,
 
     // Definicao de variaveis
     float sumvi = 0, sumvj = 0, sumvk = 0, sumv2 = 0;
-    float xx = 0, yy = 0, zz = 0;
-    float vi, vj, vk;
+    float xx, yy, zz;
 
+    switch (verlet)
+    {
+        // Pimeira integracao
+        case 1:
+            for(int i = 0 ; i < N ; i++){
+                // Calculo do deslocamento
+                xx = v_x[i]*dt + 0.5*fx[i]*pow(dt, 2);
+                yy = v_y[i]*dt + 0.5*fy[i]*pow(dt, 2);
+                zz = v_z[i]*dt + 0.5*fz[i]*pow(dt, 2);
 
-    for(int i = 0 ; i < N ; i++){
+                // Calculo das proximas posicoes com contorno
+                x[i] += xx;
+                y[i] += yy;
+                z[i] += zz;
 
-        // Calculo das proximas posicoes e velocidades
-        xx = (2*x[i]) - xm[i] + (pow(dt, 2) * fx[i]);
-        vi = (xx - xm[i]) / (2*dt);
+                // Calculo das proximas posicoes sem contorno
+                x_msd[i] += xx;
+                y_msd[i] += yy;
+                z_msd[i] += zz;
 
-        yy = (2*y[i]) - ym[i] + (pow(dt, 2) * fy[i]);
-        vj = (yy - ym[i]) / (2*dt);
+                // Calculo das velocidades no meio do intervalo
+                v_x[i] += 0.5*fx[i]*dt;
+                v_y[i] += 0.5*fy[i]*dt;
+                v_z[i] += 0.5*fz[i]*dt;
 
-        zz = (2*z[i]) - zm[i] + (pow(dt, 2) * fz[i]);
-        vk = (zz - zm[i]) / (2*dt);
+                // Condicao de contorno
+                x[i] = x[i] - floor(x[i]/L)*L;
+                y[i] = y[i] - floor(y[i]/L)*L;
+                z[i] = z[i] - floor(z[i]/L)*L;}
+            break;
+        // Segunda integracao
+        case 2:
+            for(int i = 0 ; i < N ; i++){
+                // Calculo das velocidades no fim do intervalo
+                v_x[i] += 0.5*fx[i]*dt;
+                v_y[i] += 0.5*fy[i]*dt;
+                v_z[i] += 0.5*fz[i]*dt;
 
-        sumvi += vi;
-        sumvj += vj;
-        sumvk += vk;
-        sumv2 += pow(vi, 2) + pow(vj, 2) + pow(vk, 2);
+                sumvi += v_x[i];
+                sumvj += v_y[i];
+                sumvk += v_z[i];
+                sumv2 += pow(v_x[i], 2) + pow(v_y[i], 2) + pow(v_z[i], 2);}
 
-        // Atualizacao das posicoes e das velocidades
-        xm[i] = x[i];
-        x[i] = xx;
-        v_x[i] = vi;
+            // O centro de massa nao pode se mover
+            if((-1 > sumvi || sumvi > 1) || (-1 > sumvj || sumvj > 1) || (-1 > sumvk || sumvk > 1))
+            printf("\nATENCAO: A velocidade do centro de massa e diferente de zero.\nVi = %f Vj = %f Vk = %f\n", sumvi, sumvj, sumvk);
 
-        ym[i] = y[i];
-        y[i] = yy;
-        v_y[i] = vj;
-
-        zm[i] = z[i];
-        z[i] = zz;
-        v_z[i] = vk;
+            // Calculo da temperatura e energia total do sistema
+            *temp = sumv2/(3*N);
+            *k = 0.5*sumv2/N;
+            *etot = U + *k;
+            break;
     }
-
-    // O centro de massa nao pode se mover
-    if((-0.5 > sumvi || sumvi > 0.5) || (-0.5 > sumvj || sumvj > 0.5) || (-0.5 > sumvk || sumvk > 0.5))
-       printf("\nATENCAO: A velocidade do centro de massa e diferente de zero.\nVi = %f Vj = %f Vk = %f\n", sumvi, sumvj, sumvk);
-
-    // Calculo da temperatura e energia total do sistema
-    *temp = sumv2/(3*N);
-    *k = 0.5*sumv2/N;
-    *etot = U + *k;
 }
 
 void gr(float delg, float *g, float *r, int ngr){
@@ -452,7 +465,7 @@ void gr(float delg, float *g, float *r, int ngr){
 }
 
 void msd(int ref, double *dr2, double *vac,
-            float *x, float *y, float *z, 
+            float *x, float *y, float *z,
             float *x0, float *y0, float *z0,
             float *v_x, float *v_y, float *v_z,
             float *v_x0, float *v_y0, float *v_z0){
@@ -473,7 +486,7 @@ void msd(int ref, double *dr2, double *vac,
             x0[part] = x[part];
             y0[part] = y[part];
             z0[part] = z[part];
-            
+
             v_x0[part] = v_x[part];
             v_y0[part] = v_y[part];
             v_z0[part] = v_z[part];}
