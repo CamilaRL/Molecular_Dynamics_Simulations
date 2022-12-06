@@ -28,6 +28,7 @@ double U = 0, etot = 0, K = 0; // energias
 void init(float *delg);
 void force(float *g, int *ngr, float delg, float t);
 void chain_NH(float *xi, float *vxi, float tempc, float presc);
+void integrate_NPT(float *xi, float *vxi, float tempc);
 void integrate(int passo);
 void gr(float delg, float *g, float *r, int ngr);
 void msd(int ref, double *dr2, double *vac);
@@ -161,7 +162,6 @@ void init(float *delg){
     /*
         Funcao para posicionar as particulas em uma rede cristalina e
         designar a velocidade inicial de cada uma aleatoriamente.
-
         Variáveis utilizadas:
             L : tamanho da lateral da caixa
             x, y, z : arrays com as posicoes de cada particula em cada coordenada
@@ -253,9 +253,7 @@ void force(float *g, int *ngr, float delg, float t){
     /*
         Funcao para calcular as forcas entre cada particula a partir do potencial de Lennard-Jones
         e a energia potencial.
-
         Entrada:
-
             fx, fy, fz : arrays com as forcas em cada coordenada
             U : energia potencial total por partícula
             x, y, z : arrays com as posicoes de cada particula em cada coordenada
@@ -344,7 +342,7 @@ void force(float *g, int *ngr, float delg, float t){
 
 void chain_NH(float *xi, float *vxi, float tempc){
 
-    double G1, G2, s;
+    double G1, G2, s; // G são acelerações na integracao do Velocity-Verlet, cada um relacionado a um termostato (Martyna1996, Eq. 25)
     float dt2, dt4, dt8;
 
     float Q[2] = {10, 10}; // Q1, Q2
@@ -353,7 +351,7 @@ void chain_NH(float *xi, float *vxi, float tempc){
     dt4 = dt/4;
     dt8 = dt/8;
 
-    G2 = (Q[0]*vxi[0]*vxi[0]-tempc);
+    G2 = (Q[0]*vxi[0]*vxi[0]-tempc); //
     vxi[1] = vxi[1] + G2*dt4;
     vxi[0] = vxi[0]*exp(-vxi[1]*dt8);
 
@@ -364,7 +362,7 @@ void chain_NH(float *xi, float *vxi, float tempc){
     xi[0] += vxi[0]*dt2;
     xi[1] += vxi[1]*dt2;
 
-    s = exp(-vxi[0]*dt2);
+    s = exp(-vxi[0]*dt2); // scale
 
     for (int i = 0; i < N; i++)
     {
@@ -383,11 +381,21 @@ void chain_NH(float *xi, float *vxi, float tempc){
     vxi[1] += G2*dt4;
 }
 
+void integrate_NPT(int passo, float *xi, float *vxi, float tempc){
+    
+    double X = 0, n = 0;
+    
+    switch (passo)
+    {
+        case 1:
+            
+    }
+}
+
 void integrate(int passo){
 
     /*
         Funcao que computa as proximas posicoes e velocidades.
-
         Entrada:
             U : energia potencial por partícula
             temp : temperatura do sistema
@@ -477,7 +485,6 @@ void gr(float delg, float *g, float *r, int ngr){
 
     /*
         Função que normaliza a distribuição radial, g(r).
-
         Entrada:
             *delg : tamanho dos intervalos do histograma
             *g : array distribuição radial
@@ -509,7 +516,6 @@ void msd(int ref, double *dr2, double *vac){
 
     /*
         Função que calcula o deslocamento quadrático médio das partículas
-
         Entrada:
             ref : tempo de referência para cada amostra
             *dr2 : array para armazenar o msd em cada instante de tempo
@@ -539,4 +545,3 @@ void msd(int ref, double *dr2, double *vac){
     vac[ref] /= N;
     }
 }
-
